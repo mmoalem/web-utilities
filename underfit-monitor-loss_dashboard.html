@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Loss / Timestep Scope</title>
+<style>
+  :root{
+    --bg:#0B0E10;
+    --panel:#12161A;
+    --grid:#20272C;
+    --ink:#D9E2E6;
+    --ink-dim:#7C8990;
+    --amber:#FFB000;
+    --cyan:#3FD7E0;
+    --red:#FF5D5D;
+    --font-display:'Space Grotesk','Segoe UI',sans-serif;
+    --font-mono:'IBM Plex Mono','SFMono-Regular',Consolas,monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; padding:0; background:var(--bg); color:var(--ink);
+    font-family:var(--font-mono);
+    min-height:100vh;
+  }
+  @font-face{
+    font-family:'Space Grotesk';
+    src:local('Space Grotesk');
+  }
+  .wrap{ max-width:1180px; margin:0 auto; padding:28px 20px 60px; }
+
+  header{
+    display:flex; align-items:baseline; justify-content:space-between;
+    border-bottom:1px solid var(--grid); padding-bottom:16px; margin-bottom:22px;
+    flex-wrap:wrap; gap:10px;
+  }
+  header .title{
+    font-family:var(--font-display); font-weight:600; font-size:22px; letter-spacing:0.3px;
+    color:var(--ink); display:flex; align-items:baseline; gap:10px;
+  }
+  header .title .dot{
+    width:9px; height:9px; border-radius:50%; background:var(--amber);
+    box-shadow:0 0 8px 2px rgba(255,176,0,0.6);
+    display:inline-block; transform:translateY(-2px);
+  }
+  header .sub{ color:var(--ink-dim); font-size:12px; letter-spacing:0.5px; }
+
+  /* dropzone */
+  #dropzone{
+    border:1px dashed #333c42; border-radius:2px; padding:60px 20px;
+    text-align:center; color:var(--ink-dim); cursor:pointer;
+    background:
+      repeating-linear-gradient(0deg, transparent, transparent 27px, var(--grid) 28px),
+      repeating-linear-gradient(90deg, transparent, transparent 27px, var(--grid) 28px);
+    background-size:28px 28px;
+    transition:border-color .15s ease, color .15s ease;
+  }
+  #dropzone.drag{ border-color:var(--amber); color:var(--amber); }
+  #dropzone .big{ font-family:var(--font-display); font-size:16px; color:var(--ink); margin-bottom:6px; }
+  #dropzone .small{ font-size:11px; }
+  #fileInput{ display:none; }
+
+  #app{ display:none; }
+  #app.active{ display:block; }
+
+  .statrow{
+    display:grid; grid-template-columns:repeat(5,1fr); gap:1px;
+    background:var(--grid); border:1px solid var(--grid); margin-bottom:20px;
+  }
+  .stat{ background:var(--panel); padding:14px 16px; }
+  .stat .label{ font-size:10px; letter-spacing:1px; text-transform:uppercase; color:var(--ink-dim); margin-bottom:6px; }
+  .stat .value{ font-family:var(--font-display); font-size:20px; color:var(--ink); }
+  .stat .value.amber{ color:var(--amber); }
+  .stat .value.cyan{ color:var(--cyan); }
+  .stat .value.red{ color:var(--red); }
+
+  .panels{ display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  @media(max-width:820px){ .panels{ grid-template-columns:1fr; } .statrow{ grid-template-columns:repeat(2,1fr);} }
+
+  .panel{ background:var(--panel); border:1px solid var(--grid); padding:16px; }
+  .panel h2{
+    font-family:var(--font-display); font-weight:600; font-size:13px; letter-spacing:0.5px;
+    margin:0 0 3px; color:var(--ink);
+  }
+  .panel .desc{ font-size:11px; color:var(--ink-dim); margin-bottom:12px; }
+  svg{ display:block; width:100%; height:auto; overflow:visible; }
+  .grid-line{ stroke:var(--grid); stroke-width:1; }
+  .axis-text{ fill:var(--ink-dim); font-size:9px; font-family:var(--font-mono); }
+  .trace-raw{ stroke:none; }
+  .trace-smooth{ fill:none; stroke-width:2; }
+  .legend{ display:flex; gap:16px; margin-top:8px; font-size:10px; color:var(--ink-dim); }
+  .legend span{ display:inline-flex; align-items:center; gap:6px; }
+  .swatch{ width:10px; height:2px; display:inline-block; }
+
+  .footer-row{
+    display:flex; justify-content:space-between; align-items:center;
+    margin-top:20px; font-size:11px; color:var(--ink-dim);
+  }
+  .reload-btn{
+    background:none; border:1px solid var(--grid); color:var(--ink-dim);
+    font-family:var(--font-mono); font-size:11px; padding:6px 12px; cursor:pointer;
+  }
+  .reload-btn:hover{ border-color:var(--amber); color:var(--amber); }
+
+  #errbox{ display:none; color:var(--red); font-size:12px; margin-top:10px; }
+
+  #lookupPanel{ margin-top:18px; }
+  .lookup-row{ display:flex; gap:8px; align-items:center; }
+  .lookup-row input{
+    background:var(--bg); border:1px solid var(--grid); color:var(--ink);
+    font-family:var(--font-mono); font-size:13px; padding:8px 10px; width:140px;
+  }
+  .lookup-row input:focus{ outline:none; border-color:var(--amber); }
+  .lookup-row .reload-btn{ padding:8px 16px; }
+  #lookupResult{ margin-top:14px; }
+  #lookupResult .row{
+    display:flex; gap:24px; font-size:13px; padding:10px 0; border-top:1px solid var(--grid);
+  }
+  #lookupResult .row .k{ color:var(--ink-dim); width:90px; }
+  #lookupResult .row .v{ color:var(--ink); font-family:var(--font-display); }
+  #lookupResult .v.amber{ color:var(--amber); }
+  #lookupResult .v.cyan{ color:var(--cyan); }
+  #lookupResult .note{ color:var(--ink-dim); font-size:11px; margin-top:6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title"><span class="dot"></span>loss_by_timestep — scope view</div>
+    <div class="sub" id="fname">no file loaded</div>
+  </header>
+
+  <div id="dropzone">
+    <div class="big">drop a loss_by_timestep.bin file here</div>
+    <div class="small">or click to browse &nbsp;·&nbsp; parsed entirely in-browser, nothing uploaded anywhere</div>
+    <input id="fileInput" type="file" accept=".bin">
+  </div>
+  <div id="errbox"></div>
+
+  <div id="app">
+    <div class="statrow" id="stats"></div>
+    <div class="panels">
+      <div class="panel">
+        <h2>loss over training</h2>
+        <div class="desc">raw per-step loss with rolling mean</div>
+        <svg id="chartSteps" viewBox="0 0 560 300" preserveAspectRatio="none"></svg>
+        <div class="legend">
+          <span><i class="swatch" style="background:var(--ink-dim)"></i>raw</span>
+          <span><i class="swatch" style="background:var(--amber)"></i>rolling mean (window 50)</span>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>loss vs. diffusion timestep</h2>
+        <div class="desc">binned mean loss by normalized noise level</div>
+        <svg id="chartTimestep" viewBox="0 0 560 300" preserveAspectRatio="none"></svg>
+        <div class="legend">
+          <span><i class="swatch" style="background:var(--ink-dim)"></i>raw</span>
+          <span><i class="swatch" style="background:var(--cyan)"></i>binned mean (20 bins)</span>
+        </div>
+      </div>
+    </div>
+    <div class="panel" id="lookupPanel">
+      <h2>look up a step</h2>
+      <div class="desc">data is logged per training step (not per epoch) — enter a step index from 0 to <span id="maxStep">–</span></div>
+      <div class="lookup-row">
+        <input type="number" id="stepInput" min="0" placeholder="step index" />
+        <button class="reload-btn" id="lookupBtn">look up</button>
+      </div>
+      <div id="lookupResult"></div>
+    </div>
+
+    <div class="footer-row">
+      <span id="corrline"></span>
+      <button class="reload-btn" id="reloadBtn">load another run</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const app = document.getElementById('app');
+  const fname = document.getElementById('fname');
+  const errbox = document.getElementById('errbox');
+  const reloadBtn = document.getElementById('reloadBtn');
+
+  dropzone.addEventListener('click', ()=>fileInput.click());
+  dropzone.addEventListener('dragover', e=>{ e.preventDefault(); dropzone.classList.add('drag'); });
+  dropzone.addEventListener('dragleave', ()=> dropzone.classList.remove('drag'));
+  dropzone.addEventListener('drop', e=>{
+    e.preventDefault(); dropzone.classList.remove('drag');
+    if(e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', e=>{
+    if(e.target.files.length) handleFile(e.target.files[0]);
+  });
+  reloadBtn.addEventListener('click', ()=>{
+    app.classList.remove('active');
+    dropzone.style.display = 'block';
+    errbox.style.display = 'none';
+    fname.textContent = 'no file loaded';
+    fileInput.value = '';
+  });
+
+  function handleFile(file){
+    fname.textContent = file.name;
+    const reader = new FileReader();
+    reader.onload = function(ev){
+      try{
+        const buf = ev.target.result;
+        const parsed = parseBin(buf);
+        if(parsed.step.length === 0) throw new Error('file parsed to zero records — is this a loss_by_timestep.bin?');
+        render(parsed);
+        dropzone.style.display = 'none';
+        errbox.style.display = 'none';
+        app.classList.add('active');
+      }catch(err){
+        errbox.textContent = 'Could not parse this file: ' + err.message;
+        errbox.style.display = 'block';
+        app.classList.remove('active');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  // record layout: int32 step, float32 timestep, float32 loss, 12 bytes, repeating
+  function parseBin(buf){
+    const recSize = 12;
+    if(buf.byteLength % recSize !== 0){
+      throw new Error('byte length ' + buf.byteLength + ' is not a multiple of 12 — unexpected record layout');
+    }
+    const count = buf.byteLength / recSize;
+    const dv = new DataView(buf);
+    const step = new Int32Array(count);
+    const timestep = new Float32Array(count);
+    const loss = new Float32Array(count);
+    for(let i=0;i<count;i++){
+      const off = i*recSize;
+      step[i] = dv.getInt32(off, true);
+      timestep[i] = dv.getFloat32(off+4, true);
+      loss[i] = dv.getFloat32(off+8, true);
+    }
+    return {step, timestep, loss};
+  }
+
+  function rollingMean(arr, window){
+    const out = new Float32Array(arr.length);
+    let sum = 0;
+    for(let i=0;i<arr.length;i++){
+      sum += arr[i];
+      if(i>=window) sum -= arr[i-window];
+      out[i] = i < window-1 ? NaN : sum/window;
+    }
+    return out;
+  }
+
+  function pearson(x, y){
+    const n = x.length;
+    let mx=0,my=0;
+    for(let i=0;i<n;i++){ mx+=x[i]; my+=y[i]; }
+    mx/=n; my/=n;
+    let num=0, dx=0, dy=0;
+    for(let i=0;i<n;i++){
+      const a = x[i]-mx, b = y[i]-my;
+      num += a*b; dx += a*a; dy += b*b;
+    }
+    return num / Math.sqrt(dx*dy);
+  }
+
+  function fmt(n, d){ return Number(n).toFixed(d===undefined?4:d); }
+
+  function render(data){
+    const {step, timestep, loss} = data;
+    const n = step.length;
+
+    // stats
+    const lossMin = Math.min(...loss), lossMax = Math.max(...loss);
+    const firstWindow = Math.min(100, n);
+    const lastWindow = Math.min(100, n);
+    let firstMean=0, lastMean=0;
+    for(let i=0;i<firstWindow;i++) firstMean += loss[i];
+    firstMean/=firstWindow;
+    for(let i=n-lastWindow;i<n;i++) lastMean += loss[i];
+    lastMean/=lastWindow;
+    const corr = pearson(timestep, loss);
+
+    document.getElementById('stats').innerHTML = `
+      <div class="stat"><div class="label">steps logged</div><div class="value">${n.toLocaleString()}</div></div>
+      <div class="stat"><div class="label">loss (first 100 avg)</div><div class="value">${fmt(firstMean)}</div></div>
+      <div class="stat"><div class="label">loss (last 100 avg)</div><div class="value amber">${fmt(lastMean)}</div></div>
+      <div class="stat"><div class="label">loss range</div><div class="value">${fmt(lossMin)} – ${fmt(lossMax)}</div></div>
+      <div class="stat"><div class="label">timestep↔loss corr</div><div class="value ${Math.abs(corr)>0.3?'red':'cyan'}">${fmt(corr,3)}</div></div>
+    `;
+    document.getElementById('corrline').textContent =
+      Math.abs(corr) > 0.3
+      ? `Notable correlation between timestep and loss (r=${fmt(corr,3)}) — loss is unevenly distributed across noise levels, see right panel.`
+      : `Timestep and loss are weakly correlated (r=${fmt(corr,3)}) — loss looks fairly flat across noise levels.`;
+
+    drawStepsChart(step, loss);
+    drawTimestepChart(timestep, loss);
+    setupLookup(data);
+  }
+
+  function setupLookup(data){
+    const {step, timestep, loss} = data;
+    const n = step.length;
+    document.getElementById('maxStep').textContent = step[n-1];
+
+    const stepInput = document.getElementById('stepInput');
+    const lookupBtn = document.getElementById('lookupBtn');
+    const resultBox = document.getElementById('lookupResult');
+    stepInput.max = step[n-1];
+
+    function doLookup(){
+      resultBox.innerHTML = '';
+      const q = parseInt(stepInput.value, 10);
+      if(isNaN(q)){ return; }
+
+      // steps are sequential (0..max, +1 each record) so index lookup is direct,
+      // but fall back to nearest-match search in case a file ever has gaps
+      let idx = -1;
+      if(q >= 0 && q < n && step[q] === q){
+        idx = q;
+      } else {
+        let best = 0, bestDiff = Infinity;
+        for(let i=0;i<n;i++){
+          const diff = Math.abs(step[i]-q);
+          if(diff < bestDiff){ bestDiff = diff; best = i; }
+        }
+        idx = best;
+      }
+
+      const exact = step[idx] === q;
+      resultBox.innerHTML = `
+        <div class="row"><div class="k">step</div><div class="v">${step[idx]}</div></div>
+        <div class="row"><div class="k">loss</div><div class="v amber">${fmt(loss[idx])}</div></div>
+        <div class="row"><div class="k">timestep</div><div class="v cyan">${fmt(timestep[idx])}</div></div>
+        ${exact ? '' : `<div class="note">step ${q} isn't in the log — showing nearest logged step (${step[idx]}).</div>`}
+      `;
+    }
+
+    lookupBtn.addEventListener('click', doLookup);
+    stepInput.addEventListener('keydown', e=>{ if(e.key==='Enter') doLookup(); });
+  }
+
+  function svgEl(tag, attrs){
+    const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for(const k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+  }
+
+  function drawAxesGrid(svg, W, H, pad, xTicks, yTicks, xLabels, yLabels){
+    for(let i=0;i<=yTicks;i++){
+      const y = pad.t + (H-pad.t-pad.b) * i/yTicks;
+      svg.appendChild(svgEl('line', {x1:pad.l, x2:W-pad.r, y1:y, y2:y, class:'grid-line'}));
+      const t = svgEl('text', {x:pad.l-6, y:y+3, class:'axis-text', 'text-anchor':'end'});
+      t.textContent = yLabels[i];
+      svg.appendChild(t);
+    }
+    for(let i=0;i<=xTicks;i++){
+      const x = pad.l + (W-pad.l-pad.r) * i/xTicks;
+      svg.appendChild(svgEl('line', {x1:x, x2:x, y1:pad.t, y2:H-pad.b, class:'grid-line'}));
+      const t = svgEl('text', {x:x, y:H-pad.b+14, class:'axis-text', 'text-anchor':'middle'});
+      t.textContent = xLabels[i];
+      svg.appendChild(t);
+    }
+  }
+
+  function drawStepsChart(step, loss){
+    const svg = document.getElementById('chartSteps');
+    svg.innerHTML = '';
+    const W=560,H=300, pad={l:40,r:10,t:10,b:24};
+    const n = step.length;
+    const lossMin = Math.min(...loss), lossMax = Math.max(...loss);
+    const yMin = Math.max(0, lossMin - (lossMax-lossMin)*0.1);
+    const yMax = lossMax + (lossMax-lossMin)*0.1;
+    const xMax = step[n-1];
+
+    const yTicks=4, xTicks=4;
+    const yLabels=[]; for(let i=yTicks;i>=0;i--) yLabels.push(fmt(yMin+(yMax-yMin)*i/yTicks,2));
+    const xLabels=[]; for(let i=0;i<=xTicks;i++) xLabels.push(Math.round(xMax*i/xTicks));
+    drawAxesGrid(svg, W, H, pad, xTicks, yTicks, xLabels, yLabels);
+
+    const xScale = s => pad.l + (W-pad.l-pad.r) * (s/xMax);
+    const yScale = v => pad.t + (H-pad.t-pad.b) * (1 - (v-yMin)/(yMax-yMin));
+
+    // raw points
+    const g = svgEl('g', {});
+    for(let i=0;i<n;i++){
+      g.appendChild(svgEl('circle', {cx:xScale(step[i]), cy:yScale(loss[i]), r:1.1, fill:'var(--ink-dim)', opacity:0.35}));
+    }
+    svg.appendChild(g);
+
+    // rolling mean
+    const window = Math.max(5, Math.round(n*0.015));
+    const rm = rollingMean(loss, window);
+    let d='';
+    for(let i=0;i<n;i++){
+      if(isNaN(rm[i])) continue;
+      const x = xScale(step[i]), y = yScale(rm[i]);
+      d += (d===''?'M':'L') + x.toFixed(2) + ' ' + y.toFixed(2) + ' ';
+    }
+    svg.appendChild(svgEl('path', {d, class:'trace-smooth', stroke:'var(--amber)'}));
+  }
+
+  function drawTimestepChart(timestep, loss){
+    const svg = document.getElementById('chartTimestep');
+    svg.innerHTML = '';
+    const W=560,H=300, pad={l:40,r:10,t:10,b:24};
+    const n = timestep.length;
+    const lossMin = Math.min(...loss), lossMax = Math.max(...loss);
+    const yMin = Math.max(0, lossMin - (lossMax-lossMin)*0.1);
+    const yMax = lossMax + (lossMax-lossMin)*0.1;
+
+    const yTicks=4, xTicks=5;
+    const yLabels=[]; for(let i=yTicks;i>=0;i--) yLabels.push(fmt(yMin+(yMax-yMin)*i/yTicks,2));
+    const xLabels=[]; for(let i=0;i<=xTicks;i++) xLabels.push(fmt(i/xTicks,1));
+    drawAxesGrid(svg, W, H, pad, xTicks, yTicks, xLabels, yLabels);
+
+    const xScale = t => pad.l + (W-pad.l-pad.r) * t;
+    const yScale = v => pad.t + (H-pad.t-pad.b) * (1 - (v-yMin)/(yMax-yMin));
+
+    const g = svgEl('g', {});
+    for(let i=0;i<n;i++){
+      g.appendChild(svgEl('circle', {cx:xScale(timestep[i]), cy:yScale(loss[i]), r:1.1, fill:'var(--ink-dim)', opacity:0.3}));
+    }
+    svg.appendChild(g);
+
+    // binned mean
+    const bins = 20;
+    const sums = new Array(bins).fill(0);
+    const counts = new Array(bins).fill(0);
+    for(let i=0;i<n;i++){
+      let b = Math.floor(timestep[i]*bins);
+      if(b>=bins) b=bins-1;
+      if(b<0) b=0;
+      sums[b]+=loss[i]; counts[b]++;
+    }
+    let d='';
+    for(let b=0;b<bins;b++){
+      if(counts[b]===0) continue;
+      const mean = sums[b]/counts[b];
+      const x = xScale((b+0.5)/bins), y = yScale(mean);
+      d += (d===''?'M':'L') + x.toFixed(2) + ' ' + y.toFixed(2) + ' ';
+    }
+    svg.appendChild(svgEl('path', {d, class:'trace-smooth', stroke:'var(--cyan)'}));
+  }
+})();
+</script>
+</body>
+</html>
