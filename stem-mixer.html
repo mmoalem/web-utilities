@@ -152,11 +152,11 @@
 <body>
 <div class="wrap">
   <h1>Stem Mixer</h1>
-  <div class="sub">Drop WAV stems in, play them in sync, balance levels, export a mixdown.</div>
+  <div class="sub">Drop WAV, FLAC or MP3 stems in, play them in sync, balance levels, export a mixdown.</div>
 
   <div class="dropzone" id="dropzone">
-    Drag &amp; drop .wav files here, or click to browse
-    <input type="file" id="fileInput" accept="audio/wav,.wav" multiple>
+    Drag &amp; drop .wav / .flac / .mp3 files here, or click to browse
+    <input type="file" id="fileInput" accept="audio/wav,.wav,audio/flac,.flac,audio/mpeg,.mp3,.mp2" multiple>
   </div>
 
   <div class="transport">
@@ -331,7 +331,7 @@
 
   async function addFiles(fileList) {
     const files = Array.from(fileList).filter(f =>
-      f.type === 'audio/wav' || f.name.toLowerCase().endsWith('.wav')
+      /\.(wav|flac|mp3|mp2)$/i.test(f.name)
     );
     if (!files.length) return;
     statusMsg.textContent = 'Decoding...';
@@ -341,7 +341,7 @@
         const audioBuf = await ctx.decodeAudioData(arrayBuf.slice(0));
         const track = {
           id: idCounter++,
-          name: file.name.replace(/\.wav$/i, ''),
+          name: file.name.replace(/\.(wav|flac|mp3|mp2)$/i, ''),
           buffer: audioBuf,
           gainNode: ctx.createGain(),
           sourceNode: null,
