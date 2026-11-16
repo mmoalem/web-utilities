@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MIDI BPM Editor</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --border: #334155;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-hover: #0ea5e9;
+      --danger: #f87171;
+      --ok: #4ade80;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: linear-gradient(180deg, #0b1220, var(--bg));
+      color: var(--text);
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    .app {
+      width: 100%;
+      max-width: 720px;
+      background: rgba(17, 24, 39, 0.95);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.35);
+    }
+    h1 { margin: 0 0 8px; font-size: 1.6rem; }
+    p.lead { margin: 0 0 20px; color: var(--muted); }
+    .drop {
+      border: 2px dashed #475569;
+      border-radius: 12px;
+      padding: 28px;
+      text-align: center;
+      background: #0b1324;
+      transition: border-color .15s, background .15s;
+    }
+    .drop.drag { border-color: var(--accent); background: #0d1b2f; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+    button, .file-btn {
+      appearance: none;
+      border: 1px solid #475569;
+      background: #1e293b;
+      color: var(--text);
+      padding: 10px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font: inherit;
+    }
+    button:hover, .file-btn:hover { background: #243447; border-color: #64748b; }
+    button.primary { background: #0369a1; border-color: #0284c7; }
+    button.primary:hover { background: var(--accent-hover); }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    input[type="number"], input[type="text"] {
+      background: #0b1324;
+      color: var(--text);
+      border: 1px solid #475569;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font: inherit;
+      width: 140px;
+    }
+    input[type="file"] { display: none; }
+    .panel {
+      margin-top: 18px;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #0b1324;
+    }
+    .hidden { display: none !important; }
+    .muted { color: var(--muted); }
+    .ok { color: var(--ok); }
+    .warn { color: #fbbf24; }
+    .error { color: var(--danger); margin-top: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin: 10px 0; }
+    .stat { padding: 10px; border: 1px solid #243244; border-radius: 8px; background: #0f172a; }
+    .stat .label { color: var(--muted); font-size: .85rem; }
+    .stat .value { font-size: 1.15rem; margin-top: 4px; }
+    ul.tempos { margin: 8px 0 0; padding-left: 18px; color: var(--muted); max-height: 160px; overflow: auto; }
+    code { background: #172033; padding: 2px 6px; border-radius: 4px; }
+    .footer { margin-top: 16px; color: var(--muted); font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>MIDI BPM Editor</h1>
+    <p class="lead">Load a Standard MIDI file to inspect its tempo. For constant-tempo files you can change the declared BPM while keeping the piece length the same (retimes events) — useful when a transcriber mislabeled the BPM. Processing happens locally in your browser.</p>
+
+    <div id="drop" class="drop">
+      <div><strong>Drop a .mid / .midi file here</strong></div>
+      <div class="muted" style="margin-top:6px;">or</div>
+      <div class="row" style="justify-content:center;">
+        <label class="file-btn" for="fileInput">Choose file</label>
+        <input id="fileInput" type="file" accept=".mid,.midi,audio/midi,audio/x-midi" />
+      </div>
+      <div id="fileName" class="muted" style="margin-top:10px;"></div>
+    </div>
+
+    <div id="error" class="error hidden"></div>
+
+    <div id="results" class="panel hidden">
+      <div class="grid">
+        <div class="stat"><div class="label">Format</div><div id="statFormat" class="value"></div></div>
+        <div class="stat"><div class="label">Tracks</div><div id="statTracks" class="value"></div></div>
+        <div class="stat"><div class="label">PPQ (ticks/quarter)</div><div id="statPpq" class="value"></div></div>
+        <div class="stat"><div class="label">Tempo events</div><div id="statTempoCount" class="value"></div></div>
+      </div>
+
+      <div id="constantPanel" class="hidden">
+        <h3 style="margin: 8px 0 6px;">Constant tempo</h3>
+        <p id="constantInfo" class="muted" style="margin:0 0 10px;"></p>
+        <div class="row">
+          <label for="newBpm"><strong>New BPM</strong></label>
+          <input id="newBpm" type="number" min="1" max="1000" step="0.01" />
+          <button id="applyConstant" class="primary">Apply</button>
+        </div>
+        <label style="display:flex; gap:8px; align-items:flex-start; margin-top:12px; color: var(--muted);">
+          <input id="preserveLength" type="checkbox" checked style="margin-top:4px;" />
+          <span><strong style="color:var(--text);">Preserve piece length (recommended for mislabeled BPM)</strong><br>
+          Retimes all MIDI events so the real-time duration stays the same and only the declared BPM changes. Uncheck to keep tick timing unchanged (changes playback speed/duration).</span>
+        </label>
+      </div>
+
+      <div id="variedPanel" class="hidden">
+        <h3 style="margin: 8px 0 6px;">Varied tempo</h3>
+        <p id="variedInfo" class="warn" style="margin:0 0 10px;"></p>
+        <details>
+          <summary class="muted">Show detected tempo changes</summary>
+          <ul id="tempoList" class="tempos"></ul>
+        </details>
+        <div class="row" style="margin-top:12px;">
+          <label for="shiftBpm"><strong>Shift all by (BPM)</strong></label>
+          <input id="shiftBpm" type="number" step="0.01" value="0" />
+          <button id="applyShiftDown">Shift down</button>
+          <button id="applyShiftUp" class="primary">Shift up</button>
+        </div>
+        <p class="muted" style="margin:10px 0 0;">Positive shifts make it faster, negative shifts slower. Each tempo point becomes <code>old BPM + shift</code> (clamped to stay above 0).</p>
+      </div>
+
+      <div id="downloadPanel" class="hidden" style="margin-top:16px; padding-top:14px; border-top:1px solid var(--border);">
+        <p id="changeSummary" class="ok" style="margin:0 0 10px;"></p>
+        <button id="downloadBtn" class="primary">Download modified MIDI</button>
+      </div>
+    </div>
+
+    <div class="footer">Note: Standard MIDI tempo defaults to 120 BPM when no tempo event is present. "Preserve piece length" rescales event timing so duration stays constant; otherwise only the tempo value changes (affecting playback speed).</div>
+  </div>
+
+<script>
+(() => {
+  const drop = document.getElementById('drop');
+  const fileInput = document.getElementById('fileInput');
+  const fileNameEl = document.getElementById('fileName');
+  const errorEl = document.getElementById('error');
+  const resultsEl = document.getElementById('results');
+  const constantPanel = document.getElementById('constantPanel');
+  const variedPanel = document.getElementById('variedPanel');
+  const downloadPanel = document.getElementById('downloadPanel');
+  const tempoListEl = document.getElementById('tempoList');
+
+  let originalName = 'output.mid';
+  let midi = null; // { format, ntrks, division, headerBytes, tracks: [{events:[{tick, bytes:Uint8Array, isTempo, us?}]}] }
+  let modifiedBuffer = null;
+
+  function showError(msg) {
+    errorEl.textContent = msg;
+    errorEl.classList.remove('hidden');
+  }
+  function clearError() { errorEl.textContent = ''; errorEl.classList.add('hidden'); }
+  function round(n, d = 3) { const p = Math.pow(10, d); return Math.round(n * p) / p; }
+  function usToBpm(us) { return 60000000 / us; }
+  function bpmToUs(bpm) { return Math.max(1, Math.min(0xFFFFFF, Math.round(60000000 / bpm))); }
+
+  function readStr(view, offset, len) {
+    let s = '';
+    for (let i = 0; i < len; i++) s += String.fromCharCode(view.getUint8(offset + i));
+    return s;
+  }
+  function readVlq(bytes, i) {
+    let value = 0;
+    for (let c = 0; c < 4 && i < bytes.length; c++) {
+      const b = bytes[i++];
+      value = (value << 7) | (b & 0x7f);
+      if ((b & 0x80) === 0) return { value, i };
+    }
+    return { value, i };
+  }
+  function writeVlq(value) {
+    let v = Math.max(0, value >>> 0);
+    let buffer = v & 0x7f;
+    const out = [];
+    while ((v >>= 7)) { buffer <<= 8; buffer |= 0x80 | (v & 0x7f); }
+    while (true) { out.push(buffer & 0xff); if (buffer & 0x80) buffer >>= 8; else break; }
+    return Uint8Array.from(out);
+  }
+  function concat(arrays) {
+    const total = arrays.reduce((s, a) => s + a.length, 0);
+    const out = new Uint8Array(total);
+    let o = 0;
+    for (const a of arrays) { out.set(a, o); o += a.length; }
+    return out;
+  }
+
+  function parseMidi(buffer) {
+    const view = new DataView(buffer);
+    const bytes = new Uint8Array(buffer);
+    if (view.byteLength < 14) throw new Error('File is too small to be a valid MIDI file.');
+    if (readStr(view, 0, 4) !== 'MThd') throw new Error('Missing MThd header. Not a valid Standard MIDI file.');
+    const headerLen = view.getUint32(4, false);
+    const format = view.getUint16(8, false);
+    const ntrks = view.getUint16(10, false);
+    const division = view.getUint16(12, false);
+    if (division & 0x8000) throw new Error('SMPTE time-division MIDI files are not supported by this tool.');
+    if (headerLen < 6) throw new Error('Invalid MIDI header length.');
+
+    const headerEnd = 8 + headerLen;
+    const headerBytes = bytes.slice(0, headerEnd);
+    let offset = headerEnd;
+    const tracks = [];
+
+    for (let t = 0; t < ntrks && offset + 8 <= bytes.length; t++) {
+      const chunkId = readStr(view, offset, 4);
+      const chunkLen = view.getUint32(offset + 4, false);
+      const trackStart = offset + 8;
+      const trackEnd = Math.min(trackStart + chunkLen, bytes.length);
+      offset = trackStart + chunkLen;
+      if (chunkId !== 'MTrk') { tracks.push({ events: [], raw: bytes.slice(trackStart, trackEnd), id: chunkId }); continue; }
+
+      const events = [];
+      let i = trackStart;
+      let tick = 0;
+      let runningStatus = 0;
+      while (i < trackEnd) {
+        const d = readVlq(bytes, i); i = d.i; tick += d.value;
+        if (i >= trackEnd) break;
+        let status = bytes[i];
+        if (status < 0x80) {
+          if (!runningStatus) throw new Error('Running status encountered without a prior status byte.');
+          status = runningStatus;
+        } else {
+          i++;
+          if (status < 0xF0) runningStatus = status; else runningStatus = 0;
+        }
+
+        if (status === 0xFF) {
+          if (i >= trackEnd) break;
+          const type = bytes[i++];
+          const l = readVlq(bytes, i); i = l.i;
+          const len = l.value;
+          const data = bytes.slice(i, i + len);
+          i += len;
+          const ev = { tick, bytes: concat([Uint8Array.of(0xFF, type), writeVlq(len), data]), isTempo: type === 0x51 && len === 3 };
+          if (ev.isTempo) ev.us = (data[0] << 16) | (data[1] << 8) | data[2];
+          events.push(ev);
+          if (type === 0x2F) break;
+        } else if (status === 0xF0 || status === 0xF7) {
+          const l = readVlq(bytes, i); i = l.i;
+          const len = l.value;
+          const data = bytes.slice(i, i + len);
+          i += len;
+          events.push({ tick, bytes: concat([Uint8Array.of(status), writeVlq(len), data]), isTempo: false });
+        } else {
+          const hi = status & 0xF0;
+          const dataLen = (hi === 0xC0 || hi === 0xD0) ? 1 : 2;
+          const data = bytes.slice(i, i + dataLen);
+          i += dataLen;
+          events.push({ tick, bytes: concat([Uint8Array.of(status), data]), isTempo: false });
+        }
+      }
+      tracks.push({ events, id: 'MTrk' });
+    }
+    return { format, ntrks, division, headerBytes, tracks };
+  }
+
+  function getTempos() {
+    const tempos = [];
+    for (let ti = 0; ti < midi.tracks.length; ti++) {
+      for (const ev of midi.tracks[ti].events) if (ev.isTempo) tempos.push({ tick: ev.tick, us: ev.us, track: ti, ev });
+    }
+    tempos.sort((a,b) => a.tick - b.tick);
+    return tempos;
+  }
+
+  function analyzeTempos(tempos) {
+    if (tempos.length === 0) return { constant: true, defaulted: true, bpm: 120 };
+    const first = tempos[0].us;
+    const constant = tempos.every(t => t.us === first);
+    return { constant, defaulted: false, bpm: usToBpm(first), bpms: tempos.map(t => usToBpm(t.us)) };
+  }
+
+  function renderParsed() {
+    if (!midi) return;
+    const tempos = getTempos();
+    document.getElementById('statFormat').textContent = midi.format;
+    document.getElementById('statTracks').textContent = midi.ntrks;
+    document.getElementById('statPpq').textContent = midi.division;
+    document.getElementById('statTempoCount').textContent = tempos.length + (tempos.length === 0 ? ' (default 120 BPM)' : '');
+
+    const analysis = analyzeTempos(tempos);
+    constantPanel.classList.add('hidden');
+    variedPanel.classList.add('hidden');
+    downloadPanel.classList.add('hidden');
+    modifiedBuffer = null;
+
+    if (analysis.constant) {
+      const bpm = analysis.bpm;
+      document.getElementById('constantInfo').textContent = analysis.defaulted
+        ? 'No tempo event found; Standard MIDI defaults to 120 BPM. You can set a new declared BPM (a tempo event will be added at the start of the first track).'
+        : `Detected constant tempo: ${round(bpm, 4)} BPM.`;
+      document.getElementById('newBpm').value = round(bpm, 4);
+      constantPanel.classList.remove('hidden');
+    } else {
+      const bpms = analysis.bpms;
+      const min = Math.min(...bpms), max = Math.max(...bpms);
+      document.getElementById('variedInfo').textContent = `Detected varied tempo with ${bpms.length} tempo changes (${round(min, 3)}–${round(max, 3)} BPM).`;
+      tempoListEl.innerHTML = '';
+      tempos.forEach((t, idx) => {
+        const li = document.createElement('li');
+        li.textContent = `#${idx + 1} @ tick ${t.tick}: ${round(usToBpm(t.us), 4)} BPM`;
+        tempoListEl.appendChild(li);
+      });
+      variedPanel.classList.remove('hidden');
+    }
+    resultsEl.classList.remove('hidden');
+  }
+
+  function setTempoEventBytes(ev, us) {
+    const clamped = Math.max(1, Math.min(0xFFFFFF, Math.round(us)));
+    // ev.bytes = FF 51 03 xx xx xx
+    ev.bytes = Uint8Array.of(0xFF, 0x51, 0x03, (clamped >> 16) & 0xFF, (clamped >> 8) & 0xFF, clamped & 0xFF);
+    ev.us = clamped;
+  }
+
+  function ensureTempoEvent() {
+    const tempos = getTempos();
+    if (tempos.length > 0) return;
+    // insert tempo=120 at tick 0 in first MTrk
+    for (const tr of midi.tracks) {
+      if (tr.id === 'MTrk') {
+        const ev = { tick: 0, bytes: Uint8Array.of(0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20), isTempo: true, us: 500000 };
+        tr.events.unshift(ev);
+        return;
+      }
+    }
+    throw new Error('Could not find a track to insert a tempo event.');
+  }
+
+  function buildMidi(m) {
+    const chunks = [m.headerBytes];
+    for (const tr of m.tracks) {
+      let trackData;
+      if (tr.id !== 'MTrk' && tr.raw) {
+        trackData = tr.raw;
+      } else {
+        const evs = [...tr.events].sort((a,b) => a.tick - b.tick);
+        let lastTick = 0;
+        const parts = [];
+        for (const ev of evs) {
+          const delta = Math.max(0, Math.round(ev.tick - lastTick));
+          parts.push(writeVlq(delta));
+          parts.push(ev.bytes);
+          lastTick = ev.tick + (ev.tick - lastTick < 0 ? 0 : 0); // keep lastTick as scaled tick base
+          lastTick = Math.round(ev.tick);
+        }
+        // ensure end-of-track
+        const last = evs[evs.length - 1];
+        const hasEot = last && last.bytes[0] === 0xFF && last.bytes[1] === 0x2F;
+        if (!hasEot) { parts.push(writeVlq(0)); parts.push(Uint8Array.of(0xFF, 0x2F, 0x00)); }
+        trackData = concat(parts);
+      }
+      const head = new Uint8Array(8);
+      const hv = new DataView(head.buffer);
+      head[0]=0x4D; head[1]=0x54; head[2]=0x72; head[3]=0x6B; // MTrk
+      hv.setUint32(4, trackData.length, false);
+      chunks.push(head, trackData);
+    }
+    // fix header ntrks in case
+    const out = concat(chunks);
+    const ov = new DataView(out.buffer);
+    ov.setUint16(10, midi.tracks.length, false);
+    return out.buffer;
+  }
+
+  function cloneMidi() {
+    return {
+      format: midi.format, ntrks: midi.ntrks, division: midi.division,
+      headerBytes: midi.headerBytes.slice(),
+      tracks: midi.tracks.map(tr => tr.id !== 'MTrk' && tr.raw ? { id: tr.id, raw: tr.raw.slice(), events: [] } : {
+        id: 'MTrk',
+        events: tr.events.map(ev => ({ tick: ev.tick, isTempo: ev.isTempo, us: ev.us, bytes: ev.bytes.slice() }))
+      })
+    };
+  }
+
+  function applyConstant(newBpm) {
+    if (!midi) return;
+    if (!(newBpm > 0)) throw new Error('BPM must be greater than 0.');
+    const preserve = document.getElementById('preserveLength').checked;
+    const m = cloneMidi();
+    // ensure tempo exists in working copy
+    const origTempos = getTempos();
+    const oldBpm = origTempos.length ? usToBpm(origTempos[0].us) : 120;
+    if (origTempos.length === 0) {
+      // insert into clone
+      for (const tr of m.tracks) { if (tr.id === 'MTrk') { tr.events.unshift({ tick: 0, bytes: Uint8Array.of(0xFF,0x51,0x03,0x07,0xA1,0x20), isTempo:true, us:500000 }); break; } }
+    }
+
+    const factor = newBpm / oldBpm; // for preserve-length: scale ticks so duration stays same
+    for (const tr of m.tracks) {
+      if (tr.id !== 'MTrk') continue;
+      for (const ev of tr.events) {
+        if (preserve) ev.tick = Math.round(ev.tick * factor);
+        if (ev.isTempo) setTempoEventBytes(ev, bpmToUs(newBpm));
+      }
+    }
+    modifiedBuffer = buildMidi(m);
+    const mode = preserve ? 'kept piece length the same (retimed events)' : 'kept tick timing unchanged (playback speed/duration will change)';
+    const count = m.tracks.reduce((s,tr)=>s+tr.events.filter(e=>e.isTempo).length,0);
+    document.getElementById('changeSummary').textContent = `Ready: declared tempo ${round(oldBpm,4)} → ${round(newBpm,4)} BPM, ${mode}. ${count} tempo event${count===1?'':'s'} set.`;
+    downloadPanel.classList.remove('hidden');
+  }
+
+  function applyShift(delta) {
+    if (!midi) return;
+    const tempos = getTempos();
+    if (tempos.length === 0) throw new Error('No tempo events to shift.');
+    const m = cloneMidi();
+    let changed = 0, minBpm = Infinity, maxBpm = -Infinity;
+    for (const tr of m.tracks) {
+      if (tr.id !== 'MTrk') continue;
+      for (const ev of tr.events) {
+        if (!ev.isTempo) continue;
+        const oldBpm = usToBpm(ev.us);
+        const newBpm = oldBpm + delta;
+        if (!(newBpm > 0)) throw new Error(`Shift would make a tempo ${round(oldBpm,4)} + (${delta}) = ${round(newBpm,4)} BPM, which is not allowed.`);
+        setTempoEventBytes(ev, bpmToUs(newBpm));
+        changed++; minBpm = Math.min(minBpm, newBpm); maxBpm = Math.max(maxBpm, newBpm);
+      }
+    }
+    modifiedBuffer = buildMidi(m);
+    const sign = delta >= 0 ? '+' : '';
+    document.getElementById('changeSummary').textContent = `Ready: shifted ${changed} tempo event${changed===1?'':'s'} by ${sign}${round(delta,4)} BPM (new range ${round(minBpm,3)}–${round(maxBpm,3)} BPM). Tick timing unchanged.`;
+    downloadPanel.classList.remove('hidden');
+  }
+
+  async function handleFile(file) {
+    clearError();
+    resultsEl.classList.add('hidden');
+    downloadPanel.classList.add('hidden');
+    modifiedBuffer = null;
+    try {
+      originalName = file.name || 'output.mid';
+      fileNameEl.textContent = `Loaded: ${originalName}`;
+      const buf = await file.arrayBuffer();
+      midi = parseMidi(buf);
+      renderParsed();
+    } catch (e) {
+      midi = null;
+      showError(e && e.message ? e.message : String(e));
+    }
+  }
+
+  fileInput.addEventListener('change', (e) => { const f = e.target.files && e.target.files[0]; if (f) handleFile(f); });
+  ['dragenter','dragover'].forEach(evt => drop.addEventListener(evt, (e) => { e.preventDefault(); drop.classList.add('drag'); }));
+  ['dragleave','drop'].forEach(evt => drop.addEventListener(evt, (e) => { e.preventDefault(); drop.classList.remove('drag'); }));
+  drop.addEventListener('drop', (e) => { const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) handleFile(f); });
+
+  document.getElementById('applyConstant').addEventListener('click', () => {
+    try { clearError(); applyConstant(parseFloat(document.getElementById('newBpm').value)); }
+    catch (e) { showError(e.message || String(e)); }
+  });
+  document.getElementById('applyShiftUp').addEventListener('click', () => {
+    try { clearError(); const d = Math.abs(parseFloat(document.getElementById('shiftBpm').value)); if (!(d>0)) throw new Error('Enter a shift amount greater than 0.'); applyShift(d); }
+    catch (e) { showError(e.message || String(e)); }
+  });
+  document.getElementById('applyShiftDown').addEventListener('click', () => {
+    try { clearError(); const d = Math.abs(parseFloat(document.getElementById('shiftBpm').value)); if (!(d>0)) throw new Error('Enter a shift amount greater than 0.'); applyShift(-d); }
+    catch (e) { showError(e.message || String(e)); }
+  });
+  document.getElementById('downloadBtn').addEventListener('click', () => {
+    if (!modifiedBuffer) return;
+    const base = originalName.replace(/\.midi?$/i, '') || 'output';
+    const outName = base + '.bpm-edited.mid';
+    const blob = new Blob([modifiedBuffer], { type: 'audio/midi' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = outName; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+})();
+</script>
+</body>
+</html>
